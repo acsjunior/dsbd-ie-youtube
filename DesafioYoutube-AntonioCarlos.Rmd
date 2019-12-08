@@ -1,0 +1,337 @@
+---
+title: "Desafio: Predizendo o número de inscritos em canais do Youtube"
+author: "Antonio C. da Silva Júnior"
+date: "15/04/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.width=12, fig.height=8)
+setwd("/Volumes/Junior/UFPR/DSBD/macalan/infEst")
+```
+<hr>
+
+###1 - Carregando o dataset e os pacotes necessários:
+```{r}
+library(ggplot2)
+library(ggthemes)
+library(tidyr)
+suppressMessages(library(dplyr))
+
+df <- read.csv("Conjunto de dados.txt", sep = "")
+head(df)
+str(df)
+```
+<hr>
+
+###2 - Organizando os dados por canal:
+```{r}
+channels <- unique(df$CANAL)
+df.1 <- df %>% filter(CANAL == channels[1])
+df.2 <- df %>% filter(CANAL == channels[2])
+head(df.1)
+head(df.2)
+```
+<hr>
+
+###3 - Calculando o número acumulado de inscritos:
+```{r}
+df.1$cum.inscritos <- cumsum(df.1$INSCRITOS)/100000
+head(df.1)
+
+df.2$cum.inscritos <- cumsum(df.2$INSCRITOS)/100000
+head(df.2)
+```
+<hr>
+
+###4 - Criando as funções necessárias:
+
+####4.1 - Modelo logístico $y = \dfrac{L}{1 + e^{-\beta(x - \beta_0)}}$, onde:
+* par[1] = $\beta$;
+
+* par[2] = $\beta_0$;
+
+* par[3] = $L$
+
+```{r}
+f.log <- function(par, dias) {
+  return(par[3] / (1 + exp(-par[1]*(dias - par[2]))))
+}
+```
+<hr>
+
+####4.2 - Função Perda Quadrática $\sum_{i=1}^n (y_i - μ)^2$:
+```{r}
+p.quad <- function(y, mu) {
+  return(sum((y - mu)^2))
+}
+```
+<hr>
+
+####4.3 - Função objetivo:
+```{r}
+f.log.ols <- function(par, y, dias) {
+  mu <- f.log(par, dias)
+  SQ <- p.quad(y, mu)
+  return(SQ)
+}
+```
+<hr>
+
+###5 - Canal 1 - Invento na Hora:
+
+####5.1 - Sumarizando os dados:
+```{r}
+summary(df.1)
+```
+<hr>
+
+####5.2 - Plotando o número acumulado de inscritos por dia:
+```{r}
+title.c1 = "Canal Invento na Hora"
+
+cum.plot <- function(df, x, y, title) {
+  plot <- ggplot(df, aes(x = x)) +
+    geom_line(aes(y = y), colour = "#166bcc", size = 1) +
+    labs(x = "Dias de abertura", y = "Número Acumulado de Incritos * 1000000", title = title) +
+    theme_fivethirtyeight() +
+    theme(axis.text = element_text(size = 14),
+          axis.title = element_text(size = 14, face = "bold"),
+          plot.title = element_text(size = 18))
+  return(plot)
+}
+cum.plot(df = df.1, x = df.1$DIAS, y = df.1$cum.inscritos, title = paste(title.c1, "Número Acumulado de Inscritos", sep = " - "))
+```
+<hr>
+
+####5.3 - Plotando o número de inscritos por dia:
+```{r}
+qty.plot <- function(df, x, y, title) {
+  ggplot(df, aes(x = x)) +
+    geom_point(aes(y = y/100), color = "#166bcc", alpha = 0.5, size = 2) +
+    labs(x = "Dias de abertura", y = "Número de Inscritos * 100", title = title) +
+    theme_fivethirtyeight() +
+    theme(axis.text = element_text(size = 14),
+          axis.title = element_text(size = 14, face = "bold"),
+          plot.title = element_text(size = 18))
+}
+qty.plot(df = df.1, x = df.1$DIAS, y = df.1$INSCRITOS, title = paste(title.c1, "Número de Inscritos", sep = " - "))
+```
+<hr>
+
+####5.4 - Preparando um data frame com o número total de dias:
+```{r}
+pred.df <- function(df, days) {
+  df.out <- data.frame(
+    DIAS = c(df$DIAS, (max(df$DIAS)+1):(max(df$DIAS)+days)),
+    VIEWS = c(df$VIEWS, rep(NA, days)),
+    INSCRITOS = c(df$INSCRITOS, rep(NA, days)),
+    CANAL = channels[1],
+    cum.inscritos = c(df$cum.inscritos, rep(NA, days))
+  )
+}
+
+df.1.pred <- pred.df(df.1, 365)
+```
+<hr>
+
+####5.5 - Variando manualmente os parâmetros até encontrar os valores mais próximos do ótimo:
+```{r}
+par.adj.c1 <- c(0.007, 660, 27)
+df.1.pred$adj <- f.log(par = par.adj.c1, dias = df.1.pred$DIAS)
+
+cum.plot.pred <- function(df, x, y1, y2, title, params) {
+  ggplot(df, aes(x)) +
+    geom_line(aes(y = y1, color = "Observados"), size = 1) +
+    geom_line(aes(y = y2, color = "Preditos"), linetype = "dashed", size = 1) +
+    scale_color_manual(name = "Legenda:", values = c("Preditos" = "red", "Observados" = "#166bcc")) +
+    labs(x = "Dias de abertura", y = "Número Acumulado de Incritos * 1000000", title = title) +
+    geom_vline(xintercept = max(x), linetype = "solid", color = "black") +
+    annotate("text", x = max(x)-40, y = max(y2)+1, label = round(max(y2),2), size = 6, color = "red") +
+    annotate("text", x = max(x)*0.8, y = max(y2)*0.1, label = paste0("L==",params[3]), size = 6, parse = T) +
+    annotate("text", x = max(x)*0.8, y = max(y2)*0.2, label = paste0("beta[0]==",params[2]), size = 6, parse = T) +
+    annotate("text", x = max(x)*0.8, y = max(y2)*0.3, label = paste0("beta==",params[1]), size = 6, parse = T) +
+    theme_fivethirtyeight() +
+    theme(axis.text = element_text(size = 14),
+          axis.title = element_text(size = 14, face = "bold"),
+          plot.title = element_text(size = 18),
+          legend.title = element_text(size = 14),
+          legend.text = element_text(size = 14))
+}
+
+cum.plot.pred(df = df.1.pred, x = df.1.pred$DIAS, y1 = df.1.pred$cum.inscritos, y2 = df.1.pred$adj, title = paste(title.c1, "Número Acumulado de Inscritos", sep = " - "), params = par.adj.c1)
+```
+<hr>
+
+####5.6 - Otimizando o modelo:
+
+#####5.6.1 - Criando um grid de combinações em torno dos parâmetros encontrados manualmente:
+```{r}
+init.beta <- seq(0.006, 0.009, 0.001)
+init.beta0 <- seq(600, 700, 1)
+init.L <- seq(20, 40, 1)
+
+grid.c1 <- as.data.frame(crossing(init.beta, init.beta0, init.L))
+
+head(grid.c1)
+```
+<hr>
+
+##### 5.6.2 - Executando o otimizador com cada uma das combinações do grid como parâmetros iniciais:
+```{r}
+grid.c1$fit.beta <- NA
+grid.c1$fit.beta0 <- NA
+grid.c1$fit.L <- NA
+for(i in 1:nrow(grid.c1)) {
+  fit <- optim(par = c(grid.c1$init.beta[i], grid.c1$init.beta0[i], grid.c1$init.L[i]), fn = f.log.ols, dias = df.1$DIAS, y = df.1$cum.inscritos)$par
+  grid.c1$fit.beta[i] <- fit[1]
+  grid.c1$fit.beta0[i] <- fit[2]
+  grid.c1$fit.L[i] <- fit[3]
+}
+
+head(grid.c1)
+```
+<hr>
+
+##### 5.6.3 - Encontrando a menor perda:
+```{r}
+grid.c1$SQ <- NA
+for(i in 1:nrow(grid.c1)) {
+  perda <- f.log.ols(par = c(grid.c1$fit.beta[i], grid.c1$fit.beta0[i], grid.c1$fit.L[i]), y = df.1$cum.inscritos, dias = df.1$DIAS)
+  grid.c1$SQ[i] <- perda
+}
+
+min.loss.c1 <- grid.c1[grid.c1$SQ == min(grid.c1$SQ),]
+min.loss.c1
+
+```
+<hr>
+
+##### 5.6.4 - Populando o data frame e plotando os valores preditos:
+```{r}
+par.optim.c1 <- c(min.loss.c1$fit.beta, min.loss.c1$fit.beta0, min.loss.c1$fit.L)
+df.1.pred$fit <- f.log(par = par.optim.c1, dias = df.1.pred$DIAS)
+
+cum.plot.pred(df = df.1.pred, x = df.1.pred$DIAS, y1 = df.1.pred$cum.inscritos, y2 = df.1.pred$fit, title = paste(title.c1, "Número Acumulado de Inscritos", sep = " - "), params = par.optim.c1)
+```
+<hr>
+
+###6 - Canal 2 - Você Sabia:
+
+####6.1 - Sumarizando os dados:
+
+```{r}
+summary(df.2)
+```
+<hr>
+
+####6.2 - Plotando o número acumulado de inscritos por dia:
+```{r}
+
+title.c2 = "Canal Você Sabia"
+
+cum.plot(df = df.2, x = df.2$DIAS, y = df.2$cum.inscritos, title = paste(title.c2, "Número Acumulado de Inscritos", sep = " - "))
+```
+<hr>
+
+####6.3 - Plotando o número de inscritos por dia:
+```{r}
+qty.plot(df = df.2, x = df.2$DIAS, y = df.2$INSCRITOS, title = paste(title.c2, "Número de Inscritos", sep = " - "))
+```
+<hr>
+
+####6.4 - Preparando um data frame com o número total de dias:
+```{r}
+df.2.pred <- pred.df(df.2, 365)
+```
+<hr>
+
+####6.5 - Variando manualmente os parâmetros até encontrar os valores mais próximos do ótimo:
+```{r}
+par.adj.c2 <- c(0.009, 600, 30)
+df.2.pred$adj <- f.log(par = par.adj.c2, dias = df.2.pred$DIAS)
+
+cum.plot.pred(df = df.2.pred, x = df.2.pred$DIAS, y1 = df.2.pred$cum.inscritos, y2 = df.2.pred$adj, title = paste(title.c2, "Número Acumulado de Inscritos", sep = " - "), params = par.adj.c2)
+```
+<hr>
+
+####6.6 - Otimizando o modelo:
+
+#####6.6.1 - Criando um grid de combinações em torno dos parâmetros encontrados manualmente:
+```{r}
+init.beta <- seq(0.007, 0.01, 0.001)
+init.beta0 <- seq(550, 750, 1)
+init.L <- seq(25, 50, 1)
+
+grid.c2 <- as.data.frame(crossing(init.beta, init.beta0, init.L))
+
+head(grid.c2)
+```
+<hr>
+
+##### 6.6.2 - Executando o otimizador com cada uma das combinações do grid como parâmetros iniciais:
+```{r}
+grid.c2$fit.beta <- NA
+grid.c2$fit.beta0 <- NA
+grid.c2$fit.L <- NA
+for(i in 1:nrow(grid.c2)) {
+  fit <- optim(par = c(grid.c2$init.beta[i], grid.c2$init.beta0[i], grid.c2$init.L[i]), fn = f.log.ols, dias = df.2$DIAS, y = df.2$cum.inscritos)$par
+  grid.c2$fit.beta[i] <- fit[1]
+  grid.c2$fit.beta0[i] <- fit[2]
+  grid.c2$fit.L[i] <- fit[3]
+}
+
+head(grid.c1)
+```
+<hr>
+
+##### 6.6.3 - Encontrando a menor perda:
+```{r}
+grid.c2$SQ <- NA
+for(i in 1:nrow(grid.c2)) {
+  perda <- f.log.ols(par = c(grid.c2$fit.beta[i], grid.c2$fit.beta0[i], grid.c2$fit.L[i]), y = df.2$cum.inscritos, dias = df.2$DIAS)
+  grid.c2$SQ[i] <- perda
+}
+
+min.loss.c2 <- grid.c2[grid.c2$SQ == min(grid.c2$SQ),]
+min.loss.c2
+
+```
+<hr>
+
+##### 6.6.4 - Populando o data frame e plotando os valores preditos:
+```{r}
+par.optim.c2 <- c(min.loss.c2$fit.beta, min.loss.c2$fit.beta0, min.loss.c2$fit.L)
+df.2.pred$fit <- f.log(par = par.optim.c2, dias = df.2.pred$DIAS)
+
+cum.plot.pred(df = df.2.pred, x = df.2.pred$DIAS, y1 = df.2.pred$cum.inscritos, y2 = df.2.pred$fit, title = paste(title.c2, "Número Acumulado de Inscritos", sep = " - "), params = par.optim.c2)
+```
+<hr>
+
+####7 - Resumindo as informações:
+
+```{r}
+df.resumo <- data.frame(
+  canal = c(as.character(channels[1]), as.character(channels[2])),
+  inscritos.atual = c(max(df.1$cum.inscritos)*100000, max(df.2$cum.inscritos)*100000),
+  inscritos.365 = c(round(max(df.1.pred$fit)*100000,0), round(max(df.2.pred$fit)*100000,0))
+)
+df.resumo$crescimento = df.resumo$inscritos.365 - df.resumo$inscritos.atual
+df.resumo$cresc.perc = paste(round(df.resumo$crescimento / df.resumo$inscritos.atual * 100, 1), "%")
+
+df.resumo
+```
+
+
+###7 - Conclusão:
+
+Antes de utilizar o otimizador, foram realizados diversos testes com os parâmtros $\beta$, $\beta_0$ e $L$, variando manualmente a combinação deles e observando o comportamento da curva. Foi passada para o otimizador, como parâmetros iniciais, uma combinação que resultou em um comportamento semelhante ao da curva do número acumulado de inscritos. No entanto, foi observado que ao alterar, mesmo que sutilmente, os parâmetros iniciais, o otimizador apresentava resultados diferentes, então foi criado um grid de parâmetros, passada todas as combinações possíveis para o otimizador, armazenado os resultados em um data frame e calculada a perda quadrática em cada caso. Em seguida foi identificada a combinação dos parâmetros que resultou na menor perda quadrática e considerada esta combinação para realizar a predição.
+
+De acordo com o modelo ajustado abaixo, em 365 dias o canal Invento na Hora terá obtido mais **267.099** inscritos, totalizando **2.387.388**, apresentando um crescimento de **12,6 %**.
+
+$$y = \dfrac{24.20271}{1 + e^{-0.007327984(x - 630.2566)}}$$
+E de acordo com o modelo ajustado abaixo, em 365 dias o canal Você Sabia terá obtido mais **2.555.878** inscritos, totalizando **4.082.126**, apresentando um crescimento de **167,5 %**.
+
+$$y = \dfrac{46.69809}{1 + e^{-0.007184503(x - 702.2269)}}$$
+
+
